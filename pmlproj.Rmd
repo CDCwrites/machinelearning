@@ -1,0 +1,229 @@
+---
+title: "mlproj"
+author: "Cynthia Davies Cunha"
+date: "Thursday, January 22, 2015"
+output:
+  html_document:
+    keep_md: yes
+---
+
+# Introduction
+
+This report was created from an R Markdown file (mlproj.Rmd) that fits a model, based on the 'classe' class variable from data collected from accelerometers on 6 individuals lifting barbells, to predict whether the barbells were lifted correctly.  Each of 20 test cases result in a single letter prediction as follows.
+
+"Six young health participants were asked to perform one set of 10 repetitions of the Unilateral Dumbbell Biceps Curl in five different fashions: exactly according to the specification (Class A), throwing the elbows to the front (Class B), lifting the dumbbell only halfway (Class C), lowering the dumbbell only halfway (Class D) and throwing the hips to the front (Class E).
+
+Class A corresponds to the specified execution of the exercise, while the other 4 classes correspond to common mistakes. Participants were supervised by an experienced weight lifter to make sure the execution complied to the manner they were supposed to simulate. The exercises were performed by six male participants aged between 20-28 years, with little weight lifting experience. We made sure that all participants could easily simulate the mistakes in a safe and controlled manner by using a relatively light dumbbell (1.25kg)." http://groupware.les.inf.puc-rio.br/har#weight_lifting_exercises
+
+The training dataset used in the analysis is downloaded from
+"http://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv" and the testing dataset from "http://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv"
+
+The downloads result in 'pml-training.csv' and 'pml-testing.csv' dataset files, in a 'Project 1' directory created under the current working directory. Both are comma-separated-value (CSV) files and there are a total of 19,622 observations in the training set and 20 observations in the testing activity dataset.
+
+A model created with randomForest, with cross-validation k value=5 and mtry=2, yields an out-of-sample Accuracy of 0.9927768 and a Kappa value of 0.9908634. The Kappa statistic is a measure of concordance for categorical data that predicts agreement relative to what would be expected by chance. Samples were resampled with a bootstrap (25 samples with replacement) and 25 repetitions and p=0.75. The model, used to predict against the test dataset, resulted in a 100% prediction rate (20/20).
+
+Knitr was used to generate the report.
+
+Original study data citation: "Velloso, E.; Bulling, A.; Gellersen, H.; Ugulino, W.; Fuks, H. Qualitative Activity Recognition of Weight Lifting Exercises. Proceedings of 4th International Conference in Cooperation with SIGCHI (Augmented Human '13) . Stuttgart, Germany: ACM SIGCHI, 2013."
+
+```{r loadlibs, results='hide', echo=FALSE}
+library(rstudio)
+library(caret)
+```
+We retrieve the datasets, training and testing, and report their dimensions.
+```{r, results='hide', echo=FALSE}
+## Getting Data: Read data from course website into 'Project' directory
+
+```{r readdata, echo=FALSE, results='asis'}
+mainDir <- getwd()
+newProjectDir <- "./Project"
+# create the 'Project' directory, if necessary
+if( !file.exists( newProjectDir )) {
+    dir.create( file.path( mainDir, newProjectDir ))
+}
+# set current working directory to the 'Project' directory
+setwd( file.path( mainDir, newProjectDir ))
+
+# download the training dataset from the course website into 
+# the 'Project' directory, if necessary
+trainFileName <- "pml-training.csv"
+if( !file.exists( trainFileName )) {
+    fileURL = "http://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv"
+    download.file( fileURL, trainFileName )
+    
+    # record the time the dataset was downloaded
+    dateDownloaded1 <- date()
+    print("downloaded file: pml-training.csv")
+    print(date())    
+}
+
+# read the training dataset into memory
+training <- read.csv(trainFileName)
+
+# download the testing dataset from the course website into 
+# the 'Project 1' directory, if necessary
+testFileName <- "pml-testing.csv"
+if( !file.exists( testFileName )) {
+    fileURL = "http://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv"
+    download.file( fileURL, testFileName )
+    
+    # record the time the dataset was downloaded
+    dateDownloaded2 <- date()
+    print("downloaded file: pml-testing.csv")
+    print(date())   
+}
+
+# read the testing dataset into memory
+testing <- read.csv(testFileName)
+
+```
+```{r reportdatadim, echo=TRUE, results='markup'}
+dim(training)
+dim(testing)
+```
+
+## Exploring and Cleaning Data
+We remove the calculated columns, those beginning with avg, min, max, kurtosis, amplitude and skewness and create a model using the raw positional data.  We also delete columns with a preponderance of NAs, ~98% (19216/19622=0.9793089) because it makes no sense to impute from the remaining non-NA values. We then explore relationships between the remaining class variables.  
+```{r exploredata, results='hide', echo=FALSE}
+# remove calculated columns 
+a1 <- grep("*avg", names(training))
+training <- subset(training, select= -(a1))
+a2 <- grep("*min", names(training))
+training <- subset(training, select= -(a2))
+a3 <- grep("*max", names(training))
+training <- subset(training, select= -(a3))
+a4 <- grep("*kurtosis", names(training))
+training <- subset(training, select= -(a4))
+a5 <- grep("*skewness", names(training))
+training <- subset(training, select= -(a5))
+a6 <- grep("*amplitude", names(training))
+training <- subset(training, select= -(a6))
+
+# remove columns that contain predominately NAs from training data set
+# these columns have ~98% (19216/19622=0.9793089) of NAs so it makes no
+# sense to impute from the remaining non-NA values
+mydata = data.frame(length(training))
+for(i in 1:length(training)){ mydata[i] <- sum(is.na(training[, i]))}
+sum(mydata[]==19216)
+training <- subset(training, select=names(training[, which(mydata==0)]))
+dim(training)
+```
+```{r rptfnl, echo=TRUE, results='markup'}
+dim(training)
+```
+
+Exploration of the cvtd_timestamp class variable shows that study participants, adelmo and charles, performed barbell lifing on one date; carlitos and pedro, on another; and eurico and jeremy on still separate dates - none of which is important to the model.  Thus, also, delete time-date classes from training.
+```{r plottimestamp, results='asis', fig.height=6, fig.width=6}
+qplot(user_name, cvtd_timestamp,data=training)
+```
+```{r finishclean, results='markup', echo=FALSE}
+training <- training[, 8:length(training)]
+```
+
+The final dimensions of the cleaned training data are:
+```{r reportcleandatadim, results='markup'}
+dim(training)
+```
+
+The final class names of the training data set to be used in the prediction model are:
+```{r reportnames, results='markup'}
+names(training)
+```
+
+The training data indicates that total arm acceleration may be related to increased chance of doing the barbell lift incorrectly (>50 seems to yield an error condition in the plot).  A feature plot of acceleration does not show linearity.
+```{r armaccel, results='asis', fig.height=6, fig.width=10}
+qplot(total_accel_arm, classe, data=training)
+```
+```{r feature, results='asis', fig.height=6, fig.width=10}
+featurePlot(x=training[, c("total_accel_arm","total_accel_forearm", "total_accel_dumbbell", "total_accel_belt")], y=training$classe, plot="pairs")
+```
+
+## Fit a model - exploration 
+We fit a randomForest model; the outcome (classe) is a factor (categorical) variable.  A randomForest model, especially effective with boosting, can lead to a small bias because of overfitting of the data and a higher variance of predictions on the test data.  This can be ameliorated by larger cross-validation values (k>=10). Here we determine that the default cross-validation k value (5), with mtry=2, yields an Accuracy of 0.9927768 and a Kappa value of 0.9908634. Samples were resampled with a bootstrap (25 samples with replacement) with 25 repetitions.  There was no pre-processing. 
+
+> modFit <- train(classe~., data=training, method="rf")
+Warning messages:
+1: In eval(expr, envir, enclos) :
+  model fit failed for Resample16: mtry=27 Error : cannot allocate vector of size 149.7 Mb
+
+2: In nominalTrainWorkflow(x = x, y = y, wts = weights, info = trainInfo,  :
+  There were missing values in resampled performance measures.
+  
+## Important class variables
+The three most important variables in the model were roll_belt, yaw_belt,
+and magnet_dumbbell_z.  The latter makes intuitive sense as a measure of skewness of the dumbbell's ideal position.
+
+> varImp(modFit, useModel=TRUE)
+rf variable importance
+
+only 20 most important variables shown (out of 52)
+
+                  Overall
+roll_belt          100.00
+yaw_belt            82.78
+magnet_dumbbell_z   73.29
+pitch_belt          65.45
+magnet_dumbbell_y   65.16
+pitch_forearm       63.54
+magnet_dumbbell_x   55.00
+roll_forearm        54.98
+accel_belt_z        48.21
+accel_dumbbell_y    44.56
+roll_dumbbell       43.50
+magnet_belt_y       43.43
+magnet_belt_z       43.20
+accel_dumbbell_z    38.79
+roll_arm            37.90
+accel_forearm_x     35.02
+gyros_belt_z        32.78
+yaw_dumbbell        30.39
+accel_dumbbell_x    28.87
+magnet_forearm_z    28.86
+
+## Printing the exploratory model
+Printing the model indicates that a mtry value of 2 yields the best Accuracy value.
+
+> modFit
+Random Forest 
+
+19622 samples
+   52 predictor
+    5 classes: 'A', 'B', 'C', 'D', 'E' 
+
+No pre-processing
+Resampling: Bootstrapped (25 reps) 
+
+Summary of sample sizes: 19622, 19622, 19622, 19622, 19622, 19622, ... 
+
+Resampling results across tuning parameters:
+
+  mtry  Accuracy   Kappa      Accuracy SD  Kappa SD   
+   2    0.9927768  0.9908634  0.001528550  0.001936955
+  27    0.9926953  0.9907608  0.001347009  0.001706577
+  52    0.9838165  0.9795305  0.003320680  0.004202851
+
+Accuracy was used to select the optimal model using  the largest value.
+The final value used for the model was mtry = 2. 
+
+## Create a final model
+Based on the previous exploration the final model parameters are:
+
+```{r fitmod, echo=TRUE, results='asis'}
+modFit <- train(classe~., data=training, method="rf", tuneGrid=data.frame(mtry=2), trControl=trainControl(method="boot", number=25, repeats=25, p=0.75)) 
+modFit
+```
+
+## Predict based on subset of training set
+```{r makepred, echo=TRUE, results='markup'}
+answer <- predict(modFit, newdata=testing)
+```
+
+# Supplementary details - system environment and software version
+```{r supplement, results='markup'}
+# This report is generated under the following system.
+print(sessionInfo()$R.version$version.string) 
+
+# It also uses the following packages:
+citation("rstudio")
+citation("caret")
+```
